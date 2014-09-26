@@ -1,0 +1,3 @@
+name = Global common.
+description = "公用函数库."
+core = 7.x

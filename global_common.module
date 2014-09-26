@@ -1,0 +1,540 @@
+<?php
+
+/**
+ * 获取当前node.
+ * 
+ * @staticvar object|null $node 保存当前node.
+ * @return object|null
+ */
+function _get_current_node() {
+  static $node;
+  if (!isset($node)) {
+    if (arg(0) == 'node' && is_numeric(arg(1))) {
+      $node = node_load(arg(1));
+    }
+    else {
+      $node = false;
+    }
+  }
+  return $node;
+}
+
+/**
+ * 根据提供的File对象返回完整的文件URL.
+ * 
+ * @param array $file 一个file_load数组.
+ * @return string 返回URL或者空数据.
+ */
+function _get_file_uri($file) {
+  if (!empty($file)) {
+    return file_create_url($file['uri']);
+  }
+  return '';
+}
+
+/**
+ * @parse $entity_type string
+ * @parse $bundle string
+ * @parse field array
+ * @return EntityFieldQuery object
+ * 
+ * Example:   
+ * $plclist = create_entityfieldquery_result('device', 'plc', array('field_plc_stores' => array(
+ *      'co' => 'target_id',
+ *      'op' => '<',
+ *      'value' => $node->nid
+ * )));
+ */
+function _entity_create_query($entity_type, $bundle, $fields) {
+  $query = new EntityFieldQuery();
+  $query
+      ->entityCondition('entity_type', $entity_type, '=')
+      ->entityCondition('bundle', $bundle);
+
+  foreach ($fields as $field_name => $values) {
+    $op = '=';
+    $co = 'value';
+    $ppt = FALSE;  // 用于检测私有属性.
+    if (is_array($values)) {
+      if (isset($values['value'])) {
+        $value = $values['value'];
+      }
+      else {
+        $value = $values[0];
+      }
+
+      if (isset($values['op'])) {
+        $op = $values['op'];
+      }
+
+      if (isset($values['co'])) {
+        $co = $values['co'];
+      }
+
+      if (isset($values['ppt'])) {
+        $ppt = (boolean) $values['ppt'];
+      }
+    }
+    else {
+      $value = $values;
+    }
+    if ($ppt) {
+      $query->propertyCondition($field_name, $value, $op);
+    }
+    else {
+      $query->fieldCondition($field_name, $co, $value, $op);
+    }
+  }
+  return $query;
+}
+
+/**
+ * 返回Entity Field Query Result Execute的结果.
+ */
+function _entity_create_query_result($entity_type, $bundle, $fields) {
+  return create_entityfieldquery($entity_type, $bundle, $fields)->execute();
+}
+
+/**
+ * 获取用户全信息, 一般用于自定义的字段和无法加载的数据.
+ * 
+ * @return object
+ */
+function _get_user_full_info() {
+  global $user;
+  static $isload;
+  if (!isset($isload)) {
+    $isload = true;
+    $user = user_load($user->uid);
+  }
+  return $user;
+}
+
+/**
+ * 获取一个term 下面包含自己的所有id.
+ * 
+ * @param int $vid term vid.
+ * @param mixed $parents 从指定的父term开始获取,支持多个父ID(Array OR Int).
+ */
+function _get_term_tree_ids($vid, $parents = 0) {
+  if (!is_array($parents)) {
+    $parents = array($parents);
+  }
+  $term_id = $parents;
+  foreach ($parents as $parent) {
+    $tree = taxonomy_get_tree($vid, $parent);
+    foreach ($tree as $city) {
+      $term_id[] = $city->tid;
+    }
+  }
+  // 删除重复的数据.
+  $term_id = array_unique($term_id);
+  return $term_id;
+}
+
+/**
+ * 返回一个term数组,Term ID=> Term Name.
+ * 
+ * @param object $taxonomy
+ */
+function _get_term_id_name($taxonomy) {
+  $result = array();
+  foreach ($taxonomy as $term) {
+    $result[$term->tid] = $term->name;
+  }
+  return $result;
+}
+
+/**
+ * 获取taxonomys tid.
+ * 
+ * @param object $taxonomys
+ * @return array
+ */
+function _get_term_ids($taxonomys) {
+  $ids = array();
+  foreach ($taxonomys as $taxonomy) {
+    if (is_array($taxonomy)) {
+      $ids[] = $taxonomy['tid'];
+    }
+    else {
+      $ids[] = $taxonomy->tid;
+    }
+  }
+  return $ids;
+}
+
+/**
+ * 判断是否为 超级管理员.
+ * 
+ * @global type $user
+ * @return boolean
+ */
+function _user_is_admin() {
+  global $user;
+  return $user->uid == 1;
+}
+
+/**
+ * 保存一个Node,以名多次使用node_load.
+ * 
+ * @staticvar object $node
+ * @param int $nid Node ID.
+ * @return object
+ */
+function _save_node($nid = '') {
+  static $nodes = array();
+  if (!isset($nodes[$nid]) && !empty($nid)) {
+    $nodes[$nid] = node_load($nid);
+  }
+  return $nodes[$nid];
+}
+
+/* ====================================PHP GLOBAL=================================== */
+
+/**
+ * 清除数中元素的空格.
+ * 
+ * @param array $array 单唯或多唯数组.
+ */
+function _clear_trim($array) {
+  foreach ($array as $key => $value) {
+    if (is_array($value)) {
+      $array[$key] = clear_trim($value);
+    }
+    else {
+      $array[$key] = trim($value);
+    }
+    return $array;
+  }
+}
+
+/**
+ * 清除数组中的空元素.
+ * 
+ * @param array $array
+ * @return array $array 将处理后的数组返回.
+ */
+function _clear_empty_array($array) {
+  foreach ($array as $key => $value) {
+    if (is_array($value)) {
+      $array[$key] = clear_empty_array($value);
+    }
+    elseif ($value === '' OR $value === NULL) {
+      unset($array[$key]);
+    }
+    return $array;
+  }
+}
+
+/**
+ * 退出函数.
+ */
+function _quit($msg = '操作错误') {
+  exit($msg);
+}
+
+/**
+ * 获取服务器的HTTP URL.
+ * 
+ * @return string
+ */
+function _get_server_url() {
+  $proto = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] == 'on') ? 'https' : 'http';
+  $server = isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : $_SERVER['SERVER_NAME'];
+  return $proto . '://' . $server;
+}
+
+/**
+ * 目录扫描. 返回数组.
+ *
+ * @param string $source_dir 目录地址.
+ * @param int $directory_depth 扫描层级.
+ * @param boolean $hidden 是否隐藏目录中的".. 或.".
+ */
+function _directory_map($source_dir, $directory_depth = 0, $hidden = FALSE) {
+  if ($fp = @opendir($source_dir)) {
+    $filedata = array();
+    $new_depth = $directory_depth - 1;
+    $source_dir = rtrim($source_dir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+
+    while (FALSE !== ($file = readdir($fp))) {
+// Remove '.', '..', and hidden files [optional]
+      if (!trim($file, '.') OR ( $hidden == FALSE && $file[0] == '.')) {
+        continue;
+      }
+
+      if (($directory_depth < 1 OR $new_depth > 0) && @is_dir($source_dir . $file)) {
+        $filedata[$file] = _directory_map($source_dir . $file . DIRECTORY_SEPARATOR, $new_depth, $hidden);
+      }
+      else {
+        $filedata[] = $file;
+      }
+    }
+
+    closedir($fp);
+    return $filedata;
+  }
+  return FALSE;
+}
+
+/**
+ * 扫描指定的文件在一个目录中是否存在.
+ * 
+ * @staticvar boolean|string $result 用于保存扫描到的文件,如果扫描到直接返回.
+ * @param array $dirarrays 这是使用_directory_map获取出来的数组.
+ * @param string $current_dir 当前目录.
+ * @param array $scan_file 需要扫描的文件,只要扫描到其中一个就会停止.
+ * @return string 返回文件目录.
+ */
+function _search_html_index($dirarrays, $current_dir, $scan_file) {
+  static $result = false;
+  foreach ($dirarrays as $dir => $name) {
+    if (is_array($name)) {
+      _search_html_index($name, $current_dir . $dir . '/', $scan_file);
+    }
+    else {
+      if (array_search($name, $scan_file) !== FALSE) {
+        $index = array_search($name, $scan_file);
+        $result = $current_dir . $scan_file[$index];
+      }
+      if ($result) {
+        break;
+      }
+    }
+  }
+  return $result;
+}
+
+/**
+ * 检测是否是Ajax请求.
+ * 
+ * @return boolean.
+ */
+function _is_ajax() {
+  return (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest');
+}
+
+/**
+ * 更改addslashes_deep, (array)$data强制转换成数组格式.
+ * filter data array.
+ * 
+ * @param array|string $data
+ * @return array|string
+ */
+function _addslashes_deep($data) {
+  if (is_array($data)) {
+    foreach ((array) $data as $k => $v) {
+      unset($data[$k]);
+      $k = addslashes($k); // 过滤键
+      if (is_array($v)) // 如果值为数组那么又进行递归
+        $data[$k] = addslashes_deep($v);
+      else
+        $data[$k] = addslashes($v);
+    }
+  } else {
+    $data = addslashes($data);
+  }
+  return $data;
+}
+
+/**
+ * 去掉转义
+ * 
+ * @param array|string $data
+ * @return array|string
+ */
+function _stripcslashes_deep($data) {
+  if (isset($data)) {
+    if (is_array($data)) {
+      foreach ((array) $data as $k => $v) {
+        $data[$k] = stripcslashes_deep($v);
+      }
+    }
+    else {
+      $data = stripcslashes($data);
+    }
+    return $data;
+  }
+}
+
+/**
+ * 检查目标文件夹是否存在，如果不存在则自动创建该目录
+ *
+ * @access public
+ * @param string $folder 目录路径,不能使用相对于网站根目录的URL
+ *
+ * @return  bool
+ */
+function _make_dir($folder) {
+  $reval = false;
+  if (!file_exists($folder)) {
+    /* 如果目录不存在则尝试创建该目录 */
+    @umask(0);
+
+    /* 将目录路径拆分成数组 */
+    preg_match_all('/([^\/]*)\/?/i', $folder, $atmp);
+
+    /* 如果第一个字符为/则当作物理路径处理 */
+    $base = ($atmp[0][0] == '/') ? '/' : '';
+
+    /* 遍历包含路径信息的数组 */
+    foreach ($atmp[1] AS $val) {
+      if ('' != $val) {
+        $base .= $val;
+
+        if ('..' == $val || '.' == $val) {
+          /* 如果目录为.或者..则直接补/继续下一个循环 */
+          $base .= '/';
+
+          continue;
+        }
+      }
+      else {
+        continue;
+      }
+      $base .= '/';
+      if (!file_exists($base)) {
+        /* 尝试创建目录，如果创建失败则继续循环 */
+        if (@mkdir(rtrim($base, '/'), 0777)) {
+          @chmod($base, 0777);
+          $reval = true;
+        }
+      }
+    }
+  }
+  else {
+    /* 路径已经存在。返回该路径是不是一个目录 */
+    $reval = is_dir($folder);
+  }
+
+  clearstatcache();
+
+  return $reval;
+}
+
+/**
+ * 截取UTF-8编码下字符串的函数
+ *
+ * @param string $str 被截取的字符串
+ * @param int $length 截取的长度
+ * @param bool $append 是否附加省略号
+ *
+ * @return  string
+ */
+function _sub_str($str, $length = 0, $append = true) {
+  $str = trim($str);
+  $strlength = strlen($str);
+
+  if ($length == 0 || $length >= $strlength) {
+    return $str;
+  }
+  elseif ($length < 0) {
+    $length = $strlength + $length;
+    if ($length < 0) {
+      $length = $strlength;
+    }
+  }
+  if (function_exists('mb_substr')) {
+    $newstr = mb_substr($str, 0, $length, EC_CHARSET);
+  }
+  elseif (function_exists('iconv_substr')) {
+    $newstr = iconv_substr($str, 0, $length, EC_CHARSET);
+  }
+  else {
+    //$newstr = trim_right(substr($str, 0, $length));
+    $newstr = substr($str, 0, $length);
+  }
+  if ($append && $str != $newstr) {
+    $newstr .= '...';
+  }
+  return $newstr;
+}
+
+/**
+ * 加密解密函数
+ * 
+ * @param string $string 要加密或者解密的字符串.
+ * @param string $operation hash关键字.
+ * @param string $key
+ * @param int $expiry
+ * @return string
+ */
+function _get_authcode($string, $operation = 'DECODE', $key = '', $expiry = 0) {
+  $ckey_length = 4;
+
+  $key = md5($key != '' ? $key : md5($g_siteKey));
+
+  $keya = md5(substr($key, 0, 16)); // 0-16
+  $keyb = md5(substr($key, 16, 16));  //16-16
+//对字符串进行截取4个
+  $keyc = $ckey_length ? ($operation == 'DECODE' ? substr($string, 0, $ckey_length) : substr(md5(microtime()), -$ckey_length)) : '';
+
+//再进行加密
+  $cryptkey = $keya . md5($keya . $keyc);
+
+//判断加密后的长度
+  $key_length = strlen($cryptkey);
+
+//base64_decode — 对使用 MIME base64 编码的数据进行解码
+//sprintf将字串格式化命令
+  $string = ($operation == 'DECODE') ? base64_decode(substr($string, $ckey_length)) : sprintf('%010d', $expiry ? $expiry + time() : 0) . substr(md5($string . $keyb), 0, 16) . $string;
+  $string_length = strlen($string); //生成后的字符串长度
+  $result = '';
+
+//range函数创建并返回一个包含指定范围的元素的数组
+  $box = range(0, 255);
+
+  $rndkey = array();
+  for ($i = 0; $i <= 255; $i++) {
+//ord函数返回字符串第一个字符的 ASCII 值
+    $rndkey[$i] = ord($cryptkey[$i % $key_length]);
+  }
+  for ($j = $i = 0; $i < 256; $i++) {
+    $j = ($j + $box[$i] + $rndkey[$i]) % 256;
+    $tmp = $box[$i];
+    $box[$i] = $box[$j];
+    $box[$j] = $tmp;
+  }
+  for ($a = $j = $i = 0; $i < $string_length; $i++) {
+    $a = ($a + 1) % 256;
+    $j = ($j + $box[$a]) % 256;
+    $tmp = $box[$a];
+    $box[$a] = $box[$j];
+    $box[$j] = $tmp;
+    $result .= chr(ord($string[$i]) ^ ($box[($box[$a] + $box[$j]) % 256]));
+  }
+  if ($operation == 'DECODE') {
+    if ((substr($result, 0, 10) == 0 || substr($result, 0, 10) - time() > 0) && substr($result, 10, 16) == substr(md5(substr($result, 26) . $keyb), 0, 16)) {
+      return substr($result, 26);
+    }
+    else {
+      return '';
+    }
+  }
+  else {
+    return $keyc . str_replace('=', '', base64_encode($result));
+  }
+}
+
+/**
+ * 
+ * @return float
+ */
+function _get_microtime() {
+  list($usec, $sec) = explode(' ', microtime());
+  return((float) $usec + (float) $sec);
+}
+
+/**
+ * 打印数据.
+ * 
+ * @param type $arr
+ */
+function var_dump($arr) {
+  if (is_array($arr)) {
+    echo '<pre>';
+    echo var_dump($arr);
+    echo '</pre>';
+  }
+}
