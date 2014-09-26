@@ -525,16 +525,3 @@ function _get_microtime() {
   list($usec, $sec) = explode(' ', microtime());
   return((float) $usec + (float) $sec);
 }
-
-/**
- * 打印数据.
- * 
- * @param type $arr
- */
-function var_dump($arr) {
-  if (is_array($arr)) {
-    echo '<pre>';
-    echo var_dump($arr);
-    echo '</pre>';
-  }
-}
