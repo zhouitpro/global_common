@@ -33,6 +33,31 @@ function _get_file_uri($file) {
 }
 
 /**
+ * 表单执行成功以后返回指定页面,如果$url为空则返回当前页面.
+ * 
+ * @see https://api.drupal.org/api/drupal/includes%21common.inc/function/drupal_goto/7
+ */
+function _set_go_back($url = '') {
+  if(!isset($_GET['destination'])) {
+    $get = $_GET;
+    unset($get['q']);
+     $get['destination'] = $url ? $url : _get_current_path();
+    drupal_goto(current_path(), array('query' => $get));
+  }
+}
+
+/**
+ * get current path and all query.
+ * 
+ * @return string
+ */
+function _get_current_path() {
+  $get = $_GET;
+  unset($get['q']);
+  return current_path() .'?'. http_build_query($get);
+}
+
+/**
  * @parse $entity_type string
  * @parse $bundle string
  * @parse field array
@@ -92,7 +117,7 @@ function _entity_create_query($entity_type, $bundle, $fields) {
  * 返回Entity Field Query Result Execute的结果.
  */
 function _entity_create_query_result($entity_type, $bundle, $fields) {
-  return create_entityfieldquery($entity_type, $bundle, $fields)->execute();
+  return _entity_create_query($entity_type, $bundle, $fields)->execute();
 }
 
 /**
@@ -182,12 +207,12 @@ function _user_is_admin() {
  * @param int $nid Node ID.
  * @return object
  */
-function _save_node($nid = '') {
+function _save_node($key, $nid = '') {
   static $nodes = array();
-  if (!isset($nodes[$nid]) && !empty($nid)) {
-    $nodes[$nid] = node_load($nid);
+  if (!isset($nodes[$key]) && !empty($nid)) {
+    $nodes[$key] = node_load($nid);
   }
-  return $nodes[$nid];
+  return $nodes[$key];
 }
 
 /* ====================================PHP GLOBAL=================================== */
