@@ -38,10 +38,10 @@ function _get_file_uri($file) {
  * @see https://api.drupal.org/api/drupal/includes%21common.inc/function/drupal_goto/7
  */
 function _set_go_back($url = '') {
-  if(!isset($_GET['destination'])) {
+  if (!isset($_GET['destination'])) {
     $get = $_GET;
     unset($get['q']);
-     $get['destination'] = $url ? $url : _get_current_path();
+    $get['destination'] = $url ? $url : _get_current_path();
     drupal_goto(current_path(), array('query' => $get));
   }
 }
@@ -54,10 +54,14 @@ function _set_go_back($url = '') {
 function _get_current_path() {
   $get = $_GET;
   unset($get['q']);
-  return current_path() .'?'. http_build_query($get);
+  return current_path() . '?' . http_build_query($get);
 }
 
 /**
+ * create entity query.
+ * 
+ * @see https://api.drupal.org/api/drupal/includes!entity.inc/class/EntityFieldQuery/7
+ * 
  * @parse $entity_type string
  * @parse $bundle string
  * @parse field array
