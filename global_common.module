@@ -3,8 +3,8 @@
 /**
  * 获取当前node.
  * 
- * @staticvar object|null $node 保存当前node.
- * @return object|null
+ * @staticvar object|false $node 保存当前node.
+ * @return object|false
  */
 function _get_current_node() {
   static $node;
