@@ -554,3 +554,37 @@ function _get_microtime() {
   list($usec, $sec) = explode(' ', microtime());
   return((float) $usec + (float) $sec);
 }
+
+/**
+ * 递归显示当前指定目录下所有图片
+ * 使用dir函数
+ * @param string $dir 目录地址
+ * @param string $types 要获取的文件后缀
+ * @return array $files 文件列表
+ */
+function get_images($dir, $types = array('jpg', 'png', 'jpeg')) {
+    $dir = realpath($dir) . "/";
+    $files  = array();
+
+    if (!is_dir($dir)) {
+        return $files;
+    }
+
+    $pattern =  $dir . "*";
+    $file_arr = glob($pattern);
+
+    foreach ($file_arr as $file) {
+        if (is_dir($file)) {
+            $temp = get_images($file);
+
+            if (is_array($temp)) {
+                $files = array_merge($files, $temp);
+            }
+        }else {
+            if (in_array(strtolower(pathinfo($file, PATHINFO_EXTENSION)) ,$types)) {
+                $files[] = $file;
+            }
+        }   
+    }
+    return $files;
+}
