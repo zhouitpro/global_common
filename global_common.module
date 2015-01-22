@@ -2,7 +2,7 @@
 
 /**
  * 获取当前node.
- * 
+ *
  * @staticvar object|false $node 保存当前node.
  * @return object|false
  */
@@ -20,21 +20,188 @@ function _get_current_node() {
 }
 
 /**
+ * 获取taxonomys tids.
+ *
+ * @param array $taxonomys
+ * @return array
+ */
+function _taxonomy_get_ids($taxonomys) {
+  $ids = array();
+  foreach ($taxonomys as $taxonomy) {
+    if (is_array($taxonomy)) {
+      $ids[] = $taxonomy['tid'];
+    }
+    else {
+      $ids[] = $taxonomy->tid;
+    }
+  }
+  return $ids;
+}
+
+/**
+ * 克隆一个新的node返回新NODE.
+ *
+ * @return object
+ */
+function _node_clone($cnode) {
+  if(is_numeric($cnode)) {
+    $cnode = node_load($cnode);
+  }
+  $node = clone($cnode);
+  global $user;
+  $node->nid = 0;
+  $node->uid = $user->uid;
+  $node->is_new = true;
+  $node->vid = 0;
+  $node->created = REQUEST_TIME;
+  $node->changed = REQUEST_TIME;
+
+  // 自动在Title后台加上数字标示.
+  $newtitle = $node->title;
+
+  if (preg_match('#(.*)-(\d+)$#', $node->title, $matchs)) {
+    $newtitle = $matchs[1];
+    $mark = $matchs[2];
+  }
+  else {
+    $mark = 0;
+  }
+
+  $fields = field_info_fields();
+  foreach($node as $field => &$field_value) {
+    if(isset($fields[$field]) && $field_value) {
+      foreach (module_implements('clone_field_' . $fields[$field]['type']) as $module) {
+        $function = $module . '_clone_field_' . $fields[$field]['type'];
+        $function($field_value, $fields[$field]);
+      }
+    }
+  }
+  // 检查同名的Title是否有多少, 并且比较MARK取最大的.
+  $condtions = array(
+    'title' => array('ppt' => TRUE, 'value' => "%{$newtitle}%", 'op' => 'LIKE'),
+  );
+  $results = _entity_create_query_result('node', $node->type, $condtions);
+  if (!empty($results['node'])) {
+    $nids = array();
+    foreach ($results['node'] as $search) {
+      $nids[] = $search->nid;
+    }
+    $nodes = node_load_multiple($nids);
+    foreach ($nodes as $search) {
+      if (!is_object($search)) {
+        continue;
+      }
+      if (preg_match('#(.*)-(\d+)$#', $search->title, $matchs)) {
+        if ($matchs[2] > $mark) {
+          $mark = $matchs[2];
+        }
+      }
+    }
+  }
+  $node->title = $newtitle . '-' . ( ++$mark);
+  node_save($node);
+  return $node;
+}
+
+/**
+ * Clone Entity.
+ */
+function _entity_clone($entity_type, $oldentity, $field_info) {
+  if(is_numeric($oldentity)) {
+    $oldentity = entity_load_single($entity_type, $oldentity, $field_info);
+  }
+  $clone = clone $oldentity;
+
+  // $key = $field_info['foreign keys']['node']['columns']['target_id'];
+  // 清空索引.
+  $clone->id = null;
+  $clone->is_new = TRUE;
+  $fields = field_info_fields();
+  foreach($clone as $field => &$field_value) {
+    if(isset($fields[$field]) && $field_value) {
+      foreach (module_implements('clone_field_' . $fields[$field]['type']) as $module) {
+        $function = $module . '_clone_field_' . $fields[$field]['type'];
+        $function($field_value, $fields[$field]);
+      }
+    }
+  }
+  entity_save($entity_type, $clone);
+  return $clone;
+}
+
+/**
+ * clone field type is entityreference.
+ *
+ * Implements hook_clone_field_FIELD_TYPE.
+ */
+function global_common_clone_field_entityreference(&$values, $field_info) {
+  if($field_info['settings']['target_type'] == 'node') {
+    return;
+  }
+  foreach($values[LANGUAGE_NONE] as $key => &$value) {
+    $id = $value[$field_info['indexes']['target_id'][0]];
+    if($clone = _entity_clone($field_info['settings']['target_type'], $id, $field_info)) {
+      $value[$field_info['indexes']['target_id'][0]] = $clone->id;
+    }
+  }
+}
+
+/**
+ * clone field type is entityreference.
+ *
+ * Implements hook_clone_field_FIELD_TYPE.
+ */
+function global_common_clone_field_file(&$values, $field_info) {
+  foreach($values[LANGUAGE_NONE] as &$value) {
+     $f = file_load($value['fid']);
+     $f = file_copy($f, $f->uri);
+     $f->display = 1;
+     $value = get_object_vars($f);
+  }
+}
+
+/**
+ * clone field type is entityreference.
+ *
+ * Implements hook_clone_field_FIELD_TYPE.
+ */
+function global_common_clone_field_image(&$values, $field_info) {
+  foreach($values[LANGUAGE_NONE] as &$value) {
+     $f = file_load($value['fid']);
+     $f = file_copy($f, $f->uri);
+     $value = get_object_vars($f);
+  }
+}
+
+/**
+ * Wrapper a entity.
+ */
+function _entity_wrapper($entity, $type = '') {
+  if(is_numeric($entity)) {
+    if($entity = entity_load_single($type, $entity)) {
+      return FALSE;
+    }
+  }
+  $type = $type ? $type : $entity->entityType();
+  return entity_metadata_wrapper($type, $entity);
+}
+
+/**
  * 根据提供的File对象返回完整的文件URL.
- * 
+ *
  * @param array $file 一个file_load数组.
  * @return string 返回URL或者空数据.
  */
 function _get_file_uri($file) {
   if (!empty($file)) {
-    return file_create_url($file['uri']);
+    return check_plain(file_create_url($file['uri']));
   }
   return '';
 }
 
 /**
  * 表单执行成功以后返回指定页面,如果$url为空则返回当前页面.
- * 
+ *
  * @see https://api.drupal.org/api/drupal/includes%21common.inc/function/drupal_goto/7
  */
 function _set_go_back($url = '') {
@@ -47,8 +214,226 @@ function _set_go_back($url = '') {
 }
 
 /**
+ * 检查URL是否可用.
+ *
+ * @param string $url
+ * @return boolean
+ */
+function _url_is_available($url) {
+  $file_headers = @get_headers($file);
+  return $file_headers[0] == 'HTTP/1.1 200 OK';
+}
+
+/**
+ * if not http_build_url them create.
+ * install: pecl install pecl_http
+ */
+if (!function_exists('http_build_url')) {
+  define('HTTP_URL_REPLACE', 1);              // Replace every part of the first URL when there's one of the second URL
+  define('HTTP_URL_JOIN_PATH', 2);            // Join relative paths
+  define('HTTP_URL_JOIN_QUERY', 4);           // Join query strings
+  define('HTTP_URL_STRIP_USER', 8);           // Strip any user authentication information
+  define('HTTP_URL_STRIP_PASS', 16);          // Strip any password authentication information
+  define('HTTP_URL_STRIP_AUTH', 32);          // Strip any authentication information
+  define('HTTP_URL_STRIP_PORT', 64);          // Strip explicit port numbers
+  define('HTTP_URL_STRIP_PATH', 128);         // Strip complete path
+  define('HTTP_URL_STRIP_QUERY', 256);        // Strip query string
+  define('HTTP_URL_STRIP_FRAGMENT', 512);     // Strip any fragments (#identifier)
+  define('HTTP_URL_STRIP_ALL', 1024);         // Strip anything but scheme and host
+  // Build an URL
+  // The parts of the second URL will be merged into the first according to the flags argument.
+  //
+  // @param   mixed           (Part(s) of) an URL in form of a string or associative array like parse_url() returns
+  // @param   mixed           Same as the first argument
+  // @param   int             A bitmask of binary or'ed HTTP_URL constants (Optional)HTTP_URL_REPLACE is the default
+  // @param   array           If set, it will be filled with the parts of the composed url like parse_url() would return
+
+  function http_build_url($url, $parts = array(), $flags = HTTP_URL_REPLACE, &$new_url = false) {
+    $keys = array('user', 'pass', 'port', 'path', 'query', 'fragment');
+
+    // HTTP_URL_STRIP_ALL becomes all the HTTP_URL_STRIP_Xs
+    if ($flags & HTTP_URL_STRIP_ALL) {
+      $flags |= HTTP_URL_STRIP_USER;
+      $flags |= HTTP_URL_STRIP_PASS;
+      $flags |= HTTP_URL_STRIP_PORT;
+      $flags |= HTTP_URL_STRIP_PATH;
+      $flags |= HTTP_URL_STRIP_QUERY;
+      $flags |= HTTP_URL_STRIP_FRAGMENT;
+    }
+    // HTTP_URL_STRIP_AUTH becomes HTTP_URL_STRIP_USER and HTTP_URL_STRIP_PASS
+    else if ($flags & HTTP_URL_STRIP_AUTH) {
+      $flags |= HTTP_URL_STRIP_USER;
+      $flags |= HTTP_URL_STRIP_PASS;
+    }
+
+    // Parse the original URL
+    $parse_url = parse_url($url);
+
+    // Scheme and Host are always replaced
+    if (isset($parts['scheme']))
+      $parse_url['scheme'] = $parts['scheme'];
+    if (isset($parts['host']))
+      $parse_url['host'] = $parts['host'];
+
+    // (If applicable) Replace the original URL with it's new parts
+    if ($flags & HTTP_URL_REPLACE) {
+      foreach ($keys as $key) {
+        if (isset($parts[$key]))
+          $parse_url[$key] = $parts[$key];
+      }
+    }
+    else {
+      // Join the original URL path with the new path
+      if (isset($parts['path']) && ($flags & HTTP_URL_JOIN_PATH)) {
+        if (isset($parse_url['path']))
+          $parse_url['path'] = rtrim(str_replace(basename($parse_url['path']), '', $parse_url['path']), '/') . '/' . ltrim($parts['path'], '/');
+        else
+          $parse_url['path'] = $parts['path'];
+      }
+
+      // Join the original query string with the new query string
+      if (isset($parts['query']) && ($flags & HTTP_URL_JOIN_QUERY)) {
+        if (isset($parse_url['query']))
+          $parse_url['query'] .= '&' . $parts['query'];
+        else
+          $parse_url['query'] = $parts['query'];
+      }
+    }
+
+    // Strips all the applicable sections of the URL
+    // Note: Scheme and Host are never stripped
+    foreach ($keys as $key) {
+      if ($flags & (int) constant('HTTP_URL_STRIP_' . strtoupper($key)))
+        unset($parse_url[$key]);
+    }
+
+
+    $new_url = $parse_url;
+
+    return
+        ((isset($parse_url['scheme'])) ? $parse_url['scheme'] . '://' : '')
+        . ((isset($parse_url['user'])) ? $parse_url['user'] . ((isset($parse_url['pass'])) ? ':' . $parse_url['pass'] : '') . '@' : '')
+        . ((isset($parse_url['host'])) ? $parse_url['host'] : '')
+        . ((isset($parse_url['port'])) ? ':' . $parse_url['port'] : '')
+        . ((isset($parse_url['path'])) ? $parse_url['path'] : '')
+        . ((isset($parse_url['query'])) ? '?' . $parse_url['query'] : '')
+        . ((isset($parse_url['fragment'])) ? '#' . $parse_url['fragment'] : '')
+    ;
+  }
+
+}
+
+/**
+ * add query string($_GET).
+ *
+ * @param array $set_query
+ * @return string
+ */
+function _add_query_string($set_query, $uri = '') {
+  $current_uri = $uri ? $uri : _get_full_url();
+  $parse = parse_url($current_uri);
+  if (!empty($parse['query'])) {
+    parse_str($parse['query'], $query);
+    $query = array_merge($query, $set_query);
+    $parse['query'] = http_build_query($query);
+  }
+  return http_build_url('', $parse);
+}
+
+/**
+ * @return array
+ * @param array $src
+ * @param array $in
+ * @param int|string $pos
+ */
+function array_push_before($src, $in, $pos) {
+  $R = array();
+  if (is_int($pos)) {
+    $R = array_merge(array_slice($src, 0, $pos), $in, array_slice($src, $pos));
+  }
+  else {
+    foreach ($src as $k => $v) {
+      if ($k === $pos) {
+        $R = array_merge($R, $in);
+      }
+      $R[$k] = $v;
+    }
+  }
+  return $R;
+}
+
+/**
+ * @return array
+ * @param array $src
+ * @param array $in
+ * @param int|string $pos
+ */
+function array_push_after($src, $in, $pos) {
+  $R = array();
+  if (is_int($pos)) {
+    $R = array_merge(array_slice($src, 0, $pos + 1), $in, array_slice($src, $pos + 1));
+  }
+  else {
+    foreach ($src as $k => $v) {
+      $R[$k] = $v;
+      if ($k === $pos)
+        $R = array_merge($R, $in);
+    }
+  }
+  return $R;
+}
+
+/**
+ * 删除一个Query.
+ *
+ * @param mixed $delete_querys
+ * @param string $uri
+ * @return string
+ */
+function _delete_query_string($delete_querys, $uri = '') {
+  $current_uri = $uri ? $uri : _get_full_url();
+  $parse = parse_url($current_uri);
+  if (!is_array($delete_querys)) {
+    $delete_querys = array($delete_querys);
+  }
+  if (!empty($parse['query'])) {
+    parse_str($parse['query'], $query);
+    foreach ($delete_querys as $dq) {
+      if (isset($query[$dq])) {
+        unset($query[$dq]);
+      }
+    }
+  }
+  return http_build_url('', $parse);
+}
+
+/**
+ * 跨函数的保存数据.
+ *
+ * @param string $key
+ * @param mixed $value
+ * @return mixed
+ */
+function _save_static_data($key, $value = '') {
+  $data = &drupal_static($key);
+  if ($value) {
+    $data = $value;
+  }
+  return $data;
+}
+
+/**
+ * 重构drupal_goto函数.
+ * 修复当url有destination参数时无法正常跳转.
+ */
+function _drupal_goto($path = '', array $options = array(), $http_response_code = 302) {
+  unset($_GET['destination']);
+  drupal_goto($path, $options, $http_response_code);
+}
+
+/**
  * get current path and all query.
- * 
+ *
  * @return string
  */
 function _get_current_path() {
@@ -59,20 +444,41 @@ function _get_current_path() {
 
 /**
  * create entity query.
- * 
+ *
  * @see https://api.drupal.org/api/drupal/includes!entity.inc/class/EntityFieldQuery/7
- * 
+ *
  * @parse $entity_type string
  * @parse $bundle string
  * @parse field array
  * @return EntityFieldQuery object
- * 
- * Example:   
+ *
+ * Example1:
  * $plclist = create_entityfieldquery_result('device', 'plc', array('field_plc_stores' => array(
  *      'co' => 'target_id',
  *      'op' => '<',
  *      'value' => $node->nid
  * )));
+ *
+ * Example2: 对Node Title进行Link查询, 查询10条.
+ * $match = 'helloworld';
+ * $result = _entity_create_query('node', 'article', array(
+ *   'title' => array(
+ *     'ppt' => true,
+ *     'op' => 'LIKE',
+ *     'value' => "%{$match}%"
+ *   )
+ * )
+ * ))->range(0, 10)->execute();
+ *
+ * Example3: 查询Node term reference.
+ * $result = _entity_create_query('node', 'article', array(
+ *   'mytermfield' => array(
+ *     'co' => 'tid',
+ *     'op' => '=',
+ *     'value' => "998"
+ *   )
+ * )
+ * ))->range(0, 10)->execute();
  */
 function _entity_create_query($entity_type, $bundle, $fields) {
   $query = new EntityFieldQuery();
@@ -120,13 +526,19 @@ function _entity_create_query($entity_type, $bundle, $fields) {
 /**
  * 返回Entity Field Query Result Execute的结果.
  */
-function _entity_create_query_result($entity_type, $bundle, $fields) {
-  return _entity_create_query($entity_type, $bundle, $fields)->execute();
+function _entity_create_query_result($entity_type, $bundle, $fields, $wrapper = false) {
+  $entitys = _entity_create_query($entity_type, $bundle, $fields)->execute();
+  if ($wrapper && !empty($entitys)) {
+    foreach ($entitys[$entity_type] as $key => $entity) {
+      $entitys[$entity_type][$key] = entity_metadata_wrapper($entity_type, $entity);
+    }
+  }
+  return $entitys;
 }
 
 /**
  * 获取用户全信息, 一般用于自定义的字段和无法加载的数据.
- * 
+ *
  * @return object
  */
 function _get_user_full_info() {
@@ -141,7 +553,7 @@ function _get_user_full_info() {
 
 /**
  * 获取一个term 下面包含自己的所有id.
- * 
+ *
  * @param int $vid term vid.
  * @param mixed $parents 从指定的父term开始获取,支持多个父ID(Array OR Int).
  */
@@ -163,7 +575,7 @@ function _get_term_tree_ids($vid, $parents = 0) {
 
 /**
  * 返回一个term数组,Term ID=> Term Name.
- * 
+ *
  * @param object $taxonomy
  */
 function _get_term_id_name($taxonomy) {
@@ -176,7 +588,7 @@ function _get_term_id_name($taxonomy) {
 
 /**
  * 获取taxonomys tid.
- * 
+ *
  * @param object $taxonomys
  * @return array
  */
@@ -195,7 +607,7 @@ function _get_term_ids($taxonomys) {
 
 /**
  * 判断是否为 超级管理员.
- * 
+ *
  * @global type $user
  * @return boolean
  */
@@ -206,7 +618,7 @@ function _user_is_admin() {
 
 /**
  * 保存一个Node,以名多次使用node_load.
- * 
+ *
  * @staticvar object $node
  * @param int $nid Node ID.
  * @return object
@@ -223,7 +635,7 @@ function _save_node($key, $nid = '') {
 
 /**
  * 清除数中元素的空格.
- * 
+ *
  * @param array $array 单唯或多唯数组.
  */
 function _clear_trim($array) {
@@ -240,7 +652,7 @@ function _clear_trim($array) {
 
 /**
  * 清除数组中的空元素.
- * 
+ *
  * @param array $array
  * @return array $array 将处理后的数组返回.
  */
@@ -265,13 +677,50 @@ function _quit($msg = '操作错误') {
 
 /**
  * 获取服务器的HTTP URL.
- * 
+ *
  * @return string
  */
 function _get_server_url() {
   $proto = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] == 'on') ? 'https' : 'http';
   $server = isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : $_SERVER['SERVER_NAME'];
   return $proto . '://' . $server;
+}
+
+function _get_full_url() {
+  return _get_server_url() . $_SERVER['REQUEST_URI'];
+}
+
+/**
+ * 递归显示当前指定目录下所有图片， 使用dir函数.
+ * 
+ * @param string $dir 目录地址
+ * @param string $types 要获取的文件后缀
+ * @return array $files 文件列表
+ */
+function _get_images($dir, $types = array('jpg', 'png', 'jpeg')) {
+ $dir = realpath($dir) . "/";
+ $files = array();
+
+ if (!is_dir($dir)) {
+  return $files;
+ }
+
+ $pattern = $dir . "*";
+ $file_arr = glob($pattern);
+
+ foreach ($file_arr as $file) {
+  if (is_dir($file)) {
+   $temp = get_images($file);
+   if (is_array($temp)) {
+     $files = array_merge($files, $temp);
+   }
+  }else {
+   if (in_array(strtolower(pathinfo($file, PATHINFO_EXTENSION)) ,$types)) {
+     $files[] = $file;
+   }
+  }
+ }
+ return $files;
 }
 
 /**
@@ -288,7 +737,7 @@ function _directory_map($source_dir, $directory_depth = 0, $hidden = FALSE) {
     $source_dir = rtrim($source_dir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
 
     while (FALSE !== ($file = readdir($fp))) {
-// Remove '.', '..', and hidden files [optional]
+      // Remove '.', '..', and hidden files [optional]
       if (!trim($file, '.') OR ( $hidden == FALSE && $file[0] == '.')) {
         continue;
       }
@@ -309,7 +758,7 @@ function _directory_map($source_dir, $directory_depth = 0, $hidden = FALSE) {
 
 /**
  * 扫描指定的文件在一个目录中是否存在.
- * 
+ *
  * @staticvar boolean|string $result 用于保存扫描到的文件,如果扫描到直接返回.
  * @param array $dirarrays 这是使用_directory_map获取出来的数组.
  * @param string $current_dir 当前目录.
@@ -337,7 +786,7 @@ function _search_html_index($dirarrays, $current_dir, $scan_file) {
 
 /**
  * 检测是否是Ajax请求.
- * 
+ *
  * @return boolean.
  */
 function _is_ajax() {
@@ -347,7 +796,7 @@ function _is_ajax() {
 /**
  * 更改addslashes_deep, (array)$data强制转换成数组格式.
  * filter data array.
- * 
+ *
  * @param array|string $data
  * @return array|string
  */
@@ -369,7 +818,7 @@ function _addslashes_deep($data) {
 
 /**
  * 去掉转义
- * 
+ *
  * @param array|string $data
  * @return array|string
  */
@@ -482,7 +931,7 @@ function _sub_str($str, $length = 0, $append = true) {
 
 /**
  * 加密解密函数
- * 
+ *
  * @param string $string 要加密或者解密的字符串.
  * @param string $operation hash关键字.
  * @param string $key
@@ -496,27 +945,27 @@ function _get_authcode($string, $operation = 'DECODE', $key = '', $expiry = 0) {
 
   $keya = md5(substr($key, 0, 16)); // 0-16
   $keyb = md5(substr($key, 16, 16));  //16-16
-//对字符串进行截取4个
+  // 对字符串进行截取4个.
   $keyc = $ckey_length ? ($operation == 'DECODE' ? substr($string, 0, $ckey_length) : substr(md5(microtime()), -$ckey_length)) : '';
 
-//再进行加密
+  // 再进行加密.
   $cryptkey = $keya . md5($keya . $keyc);
 
-//判断加密后的长度
+  // 判断加密后的长度.
   $key_length = strlen($cryptkey);
 
-//base64_decode — 对使用 MIME base64 编码的数据进行解码
-//sprintf将字串格式化命令
+  // base64_decode — 对使用 MIME base64 编码的数据进行解码.
+  // sprintf将字串格式化命令.
   $string = ($operation == 'DECODE') ? base64_decode(substr($string, $ckey_length)) : sprintf('%010d', $expiry ? $expiry + time() : 0) . substr(md5($string . $keyb), 0, 16) . $string;
-  $string_length = strlen($string); //生成后的字符串长度
+  $string_length = strlen($string); // 生成后的字符串长度.
   $result = '';
 
-//range函数创建并返回一个包含指定范围的元素的数组
+  // range函数创建并返回一个包含指定范围的元素的数组.
   $box = range(0, 255);
 
   $rndkey = array();
   for ($i = 0; $i <= 255; $i++) {
-//ord函数返回字符串第一个字符的 ASCII 值
+    // ord函数返回字符串第一个字符的 ASCII 值.
     $rndkey[$i] = ord($cryptkey[$i % $key_length]);
   }
   for ($j = $i = 0; $i < 256; $i++) {
@@ -547,7 +996,7 @@ function _get_authcode($string, $operation = 'DECODE', $key = '', $expiry = 0) {
 }
 
 /**
- * 
+ *
  * @return float
  */
 function _get_microtime() {
@@ -556,35 +1005,189 @@ function _get_microtime() {
 }
 
 /**
- * 递归显示当前指定目录下所有图片
- * 使用dir函数
- * @param string $dir 目录地址
- * @param string $types 要获取的文件后缀
- * @return array $files 文件列表
+ * 判断是否来本地访问.
+ *
+ * @return boolean
  */
-function get_images($dir, $types = array('jpg', 'png', 'jpeg')) {
-    $dir = realpath($dir) . "/";
-    $files  = array();
+function _url_is_local() {
+  return in_array($_SERVER['HOST_NAME'], array('localhost', '127.0.0.1'));
+}
 
-    if (!is_dir($dir)) {
-        return $files;
+/**
+ * 用户解析用户输入的字符串成数字
+ * 比如: 1,2,5-10
+ * 解析结果为:1,2,5,6,7,8,9,10
+ *
+ * @param string $inputs
+ * @param string $exp
+ * @return array
+ */
+function _parse_number_group($inputs, $exp = ',，、') {
+  $retures = array();
+  // 中英,，、的支持
+  $input_array = preg_split('#['.$exp.']+#', $inputs);
+  $avai_pid = array();
+  foreach ($input_array as $input) {
+    $input = trim($input);
+    if ($input == '') {
+      continue;
+    }
+    if (is_numeric($input)) {
+      $retures[] = (int) $input;
+    }
+    elseif (preg_match('#^([0-9]+)\-([0-9]+)$#', $input, $match)) {
+      if ($match[1] < $match[2]) {
+        $retures = array_merge(range($match[1], $match[2]), $retures);
+      }
+      else {
+        $retures = array_merge(array($match[1], $match[2]), $retures);
+      }
+    }
+  }
+  $retures = array_unique($retures);
+  sort($retures);
+  return $retures;
+}
+
+/**
+ * 检测是否是合法的数字组.
+ *
+ * Example:1,2,3,5-20
+ *
+ * @param string $input
+ * @return boolean
+ */
+function _is_number_group($input) {
+  return (boolean) preg_match('#^(([0-9]+(,|，|、)?)|(\d+\-\d+(,|，|、)?))+$#', $input);
+}
+
+/**
+ * get array or object column.
+ *
+ * @param array $input
+ * @param string $columnKey
+ * @param string $indexKey
+ * @return array
+ *
+ * For Examples:
+ * $array = array();
+ * $array[] = (object) array('t' => 'test1', 'm' => 'gg');
+ * $array[] = (object) array('t' => 'test2', 'm' => 'cc');
+ * $result = _column($array, 't', 'm');
+ *
+ * @see http://php.net/manual/zh/function.array-column.php
+ */
+function _column($input = NULL, $columnKey = NULL, $indexKey = NULL) {
+
+  // Using func_get_args() in order to check for proper number of
+  // parameters and trigger errors exactly as the built-in array_column()
+  // does in PHP 5.5.
+  $argc = func_num_args();
+  $params = func_get_args();
+  if ($argc < 2) {
+    trigger_error("array_column_recursive() expects at least 2 parameters, {$argc} given", E_USER_WARNING);
+
+    return NULL;
+  }
+  if (!is_array($params[0])) {
+    // Because we call back to this function, check if call was made by self to
+    // prevent debug/error output for recursiveness :)
+    $callers = debug_backtrace();
+    if ($callers[1]['function'] != '_column') {
+      trigger_error('array_column_recursive() expects parameter 1 to be array, ' . gettype($params[0]) . ' given', E_USER_WARNING);
     }
 
-    $pattern =  $dir . "*";
-    $file_arr = glob($pattern);
+    return NULL;
+  }
+  if (!is_int($params[1]) && !is_float($params[1]) && !is_string($params[1]) && $params[1] !== NULL && !( is_object($params[1]) && method_exists($params[1], '__toString') )
+  ) {
+    trigger_error('array_column_recursive(): The column key should be either a string or an integer', E_USER_WARNING);
 
-    foreach ($file_arr as $file) {
-        if (is_dir($file)) {
-            $temp = get_images($file);
+    return FALSE;
+  }
+  if (isset($params[2]) && !is_int($params[2]) && !is_float($params[2]) && !is_string($params[2]) && !( is_object($params[2]) && method_exists($params[2], '__toString') )
+  ) {
+    trigger_error('array_column_recursive(): The index key should be either a string or an integer', E_USER_WARNING);
 
-            if (is_array($temp)) {
-                $files = array_merge($files, $temp);
-            }
-        }else {
-            if (in_array(strtolower(pathinfo($file, PATHINFO_EXTENSION)) ,$types)) {
-                $files[] = $file;
-            }
-        }   
+    return FALSE;
+  }
+  $paramsInput = $params[0];
+  $paramsColumnKey = ( $params[1] !== NULL ) ? (string) $params[1] : NULL;
+  $paramsIndexKey = NULL;
+  if (isset($params[2])) {
+    if (is_float($params[2]) || is_int($params[2])) {
+      $paramsIndexKey = (int) $params[2];
     }
-    return $files;
+    else {
+      $paramsIndexKey = (string) $params[2];
+    }
+  }
+  $resultArray = array();
+  foreach ($paramsInput as $row) {
+    $key = $value = NULL;
+    $keySet = $valueSet = FALSE;
+
+    if ($paramsIndexKey !== NULL && is_array($row) && array_key_exists($paramsIndexKey, $row)) {
+      $keySet = TRUE;
+
+      $key = (string) $row[$paramsIndexKey];
+    }
+    elseif ($paramsIndexKey !== NULL && is_object($row) && property_exists($row, $paramsIndexKey)) {
+      $keySet = True;
+      $key = (string) $row->{$paramsIndexKey};
+    }
+
+    if ($paramsColumnKey === NULL) {
+      $valueSet = TRUE;
+      $value = $row;
+    }
+    elseif (is_array($row) && array_key_exists($paramsColumnKey, $row)) {
+      $valueSet = TRUE;
+      $value = $row[$paramsColumnKey];
+    }
+    elseif (is_object($row) && property_exists($row, $paramsColumnKey)) {
+      $valueSet = TRUE;
+      $value = $row->{$paramsColumnKey};
+    }
+//
+//    $possibleValue = _column($row, $paramsColumnKey, $paramsIndexKey);
+//    if ($possibleValue) {
+//      $resultArray = array_merge($possibleValue, $resultArray);
+//    }
+
+    if ($valueSet) {
+      if ($keySet) {
+        $resultArray[$key] = $value;
+      }
+      else {
+        $resultArray[] = $value;
+      }
+    }
+  }
+
+  return $resultArray;
+}
+
+/* * ==============================DEBUG============================ */
+
+/**
+ * 数据输出.
+ *
+ * @staticvar boolean $is_dump
+ * @param mixed $data
+ */
+function _dump($data, $debugid = '', $type = 'dpm') {
+  static $is_dump;
+  if (!isset($is_dump)) {
+    $is_dump = true;
+    if (!function_exists($type)) {
+      $type = 'var_dump';
+    }
+    $type($data, $debugid);
+  }
+}
+
+function _print($data) {
+  echo '<pre>';
+  print_r($data);
 }
